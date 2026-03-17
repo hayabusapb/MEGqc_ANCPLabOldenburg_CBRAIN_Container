@@ -1,0 +1,67 @@
+#1 Create a definition file with conda env, python 3.10: MEGQC.def
+
+#
+# Singularity definition file for MegQC  
+# Alexandre Pastor-Bernier, alexandre.pastor@mcgill.ca, March 2026
+#
+
+Bootstrap: docker
+From: continuumio/miniconda3
+
+%post
+    # Update conda and install Python 3.10
+    conda update -y conda
+    conda install -y python=3.10
+    # Optional: Install additional packages, e.g., numpy
+    # conda install -y numpy
+    pip install --upgrade pip
+    pip install meg-qc
+    
+%environment
+    # Ensure Conda environment is in the PATH at runtime
+    export PATH="/opt/conda/bin:$PATH"
+    # The default environment in the base image is already activated
+    
+    
+# Build an Apptainer container (frozen image) 
+
+apptainer build <PATH_TO_IMG>/MEGqc_HL.sif <PATH_TO_DEF>/MEGQC.def 
+
+#3 shell in image and test CLI commands
+
+IN=<PATH_TO_MEG_INPUT>/<PARTICIPANT_BIDS_ID>
+
+apptainer exec --containall --bind $IN:/mnt_IN <PATH_TO_IMG>/MEGqc_HL.sif run-megqc --inputdata /mnt_IN --run-all --all
+
+# Limitations
+# invoking megqc GUI from within the container fails
+
+apptainer shell --containall <PATH_TO_IMG>/MEGqc_HL.sif megqc
+PyQt6.QtWidgets ImportError: libEGL.so.1
+
+# Solution:
+# Build a sandbox, shell in it and check package compatibility issues, download missing dependencies and test
+
+apptainer build --sandbox <PATH_TO_IMG>/MEGqc.sif <PATH_TO_DEF>/MEGQC_sand.def 
+
+apptainer shell --fakeroot --writable --containall <PATH_TO_IMG>/MEGqc.sif 
+
+# fixes still have issues with QT
+apt-get update
+apt-get install -y libegl1-mesa libgl1-mesa-glx
+pip uninstall opencv-python
+pip install opencv-python-headless
+
+
+qt.qpa.plugin: Could not load the Qt platform plugin "xcb" in "" even though it was found.
+This application failed to start because no Qt platform plugin could be initialized. Reinstalling the application may fix this problem.
+
+Available platform plugins are: offscreen, vnc, linuxfb, xcb, vkkhrdisplay, minimal, wayland-egl, wayland, minimalegl, eglfs.
+
+# the following fixes the above output but stays iddle # need to decide if GUI is necessary for CBRAIN
+unset XDG_RUNTIME_DIR
+export QT_QPA_PLATFORM=offscreen ### 
+
+# Size of operational image (MEGQC_HL.sif): 1GB
+
+
