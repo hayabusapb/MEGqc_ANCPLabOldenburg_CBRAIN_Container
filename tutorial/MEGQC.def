@@ -1,0 +1,160 @@
+# MEGQC.def  ─  Apptainer / Singularity definition file for MEGqc
+#
+# Based on the original work by:
+#   Alexandre Pastor-Bernier, alexandre.pastor@mcgill.ca, MNI / McGill, March 2026
+#
+# Improvements over the original:
+#   - Pins meg_qc to version 0.7.8
+#   - Adds required OS runtime libraries for the scientific stack
+#   - Fixes the Qt / GUI crash (QT_QPA_PLATFORM=offscreen) in %environment
+#   - Adds %runscript so `apptainer run` works directly
+#   - Adds %help and %labels
+#
+# Build:
+#   apptainer build MEGqc.sif MEGQC.def
+#
+# Quick run:
+#   apptainer run --bind /path/to/bids:/mnt_IN MEGqc.sif \
+#     --inputdata /mnt_IN --run-all --all
+
+Bootstrap: docker
+From: continuumio/miniconda3
+
+%labels
+    Author      "ANCPLab Oldenburg – University of Oldenburg"
+    Tool        "MEGqc"
+    Version     "0.7.8"
+    Maintainer  "karel.mauricio.lopez.vilaret@uni-oldenburg.de"
+    Description "MEGqc containerized for HPC / CBRAIN via Apptainer/Singularity"
+    Reference   "https://github.com/ANCPLabOldenburg/MEGqc"
+
+%post
+    # ── 1. Update conda, pin Python to 3.10 (exact version meg_qc requires) ─
+    conda update -y conda
+    conda install -y python=3.10
+
+    # ── 2. OS runtime libraries needed by MEG scientific stack ───────────────
+    # Required even in headless/offscreen mode (matplotlib, MNE, Qt internals)
+    # Qt6/XCB libraries also included so the MEGqc GUI can run on a desktop
+    # with a real display (DISPLAY=:0, QT_QPA_PLATFORM=xcb).
+    apt-get update && apt-get install -y --no-install-recommends \
+        libglib2.0-0 \
+        libgl1 \
+        libxext6 \
+        libsm6 \
+        libxrender1 \
+        libxkbcommon0 \
+        libxkbcommon-x11-0 \
+        libxcb-icccm4 \
+        libxcb-image0 \
+        libxcb-keysyms1 \
+        libxcb-randr0 \
+        libxcb-render-util0 \
+        libxcb-xinerama0 \
+        libxcb-xkb1 \
+        libxcb-cursor0 \
+        libxcb-shape0 \
+        libegl1 \
+        libdbus-1-3 \
+        libfontconfig1 \
+        libfreetype6 \
+        && rm -rf /var/lib/apt/lists/*
+
+    # ── 3. Install MEGqc from PyPI ───────────────────────────────────────────
+    pip install --upgrade pip
+    pip install "meg_qc==0.7.8"
+
+    # ── 4. Smoke-test all CLI entry points (build fails here if broken) ──────
+    run-megqc --help          > /dev/null
+    run-megqc-plotting --help > /dev/null
+    globalqualityindex --help > /dev/null
+    get-megqc-config --help   > /dev/null
+
+%environment
+    # Conda / Python on PATH
+    export PATH="/opt/conda/bin:$PATH"
+
+    # ── Headless rendering — NO display server required ──────────────────────
+    # This is the key fix for HPC / CBRAIN nodes where no X11/Wayland display
+    # is present.  Without these two variables the container crashes with:
+    #
+    #   PyQt6.QtWidgets ImportError: libEGL.so.1
+    #   qt.qpa.plugin: Could not load the Qt platform plugin "xcb"
+    #
+    # Setting offscreen mode tells Qt to render to memory instead of a screen.
+    # All HTML reports and plots are written to disk as normal.
+    export QT_QPA_PLATFORM=offscreen
+    export MPLBACKEND=Agg
+
+    # Python housekeeping
+    export PYTHONDONTWRITEBYTECODE=1
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    # Default command: run-megqc (same as Docker ENTRYPOINT)
+    # All arguments passed to `apptainer run MEGqc.sif ...` are forwarded here.
+    exec run-megqc "$@"
+
+%help
+    MEGqc 0.7.8 — HPC / CBRAIN container (Apptainer / Singularity)
+    ================================================================
+
+    Full analysis + all reports
+    ---------------------------
+    apptainer run \
+      --bind /path/to/bids:/mnt_IN \
+      --bind /path/to/config:/mnt_config \
+      MEGqc.sif \
+      --inputdata /mnt_IN \
+      --config /mnt_config/settings.ini \
+      --analysis_mode new --run-all --all
+
+    Calculation only
+    ----------------
+    apptainer run \
+      --bind /path/to/bids:/mnt_IN \
+      --bind /path/to/config:/mnt_config \
+      MEGqc.sif \
+      --inputdata /mnt_IN \
+      --config /mnt_config/settings.ini \
+      --analysis_mode new
+
+    Specific subjects
+    -----------------
+    apptainer run \
+      --bind /path/to/bids:/mnt_IN \
+      --bind /path/to/config:/mnt_config \
+      MEGqc.sif \
+      --inputdata /mnt_IN \
+      --config /mnt_config/settings.ini \
+      --subs 009 012 \
+      --analysis_mode new --run-all --all
+
+    Plotting only (after calculation)
+    ----------------------------------
+    apptainer exec \
+      --bind /path/to/bids:/mnt_IN \
+      MEGqc.sif \
+      run-megqc-plotting --inputdata /mnt_IN --all
+
+    GQI only
+    --------
+    apptainer exec \
+      --bind /path/to/bids:/mnt_IN \
+      --bind /path/to/config:/mnt_config \
+      MEGqc.sif \
+      globalqualityindex \
+      --inputdata /mnt_IN \
+      --config /mnt_config/settings.ini
+
+    Get default config file
+    -----------------------
+    apptainer exec \
+      --bind /path/to/output:/mnt_out \
+      MEGqc.sif \
+      get-megqc-config --target_directory /mnt_out
+
+    NOTE: The MEGqc graphical interface (GUI) is NOT available in this
+    container. All quality metrics and interactive HTML reports are produced
+    via the CLI commands above.
+
