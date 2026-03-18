@@ -136,15 +136,19 @@ Edit it freely — the container is not modified.
 
 ## 6. Launch the GUI (desktop only)
 
-The GUI requires a real display (`DISPLAY=:0`).  
-Bind the X11 socket and D-Bus session from the host:
+The GUI requires a real display.  
+Bind the X11 socket, XAUTHORITY, and D-Bus session from the host.
+Use the **actual** environment variables from your session — do **not**
+hard-code `:0` or a fixed D-Bus path, because multi-user servers typically
+run displays like `:130` and store D-Bus sockets under `/tmp/`:
 
 ```bash
 apptainer exec \
-  --env DISPLAY=:0 \
+  --env DISPLAY=$DISPLAY \
   --env QT_QPA_PLATFORM=xcb \
-  --env XDG_RUNTIME_DIR=/run/user/$(id -u) \
-  --env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus" \
+  --env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
+  --env DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+  --env XAUTHORITY=$XAUTHORITY \
   --bind /tmp/.X11-unix:/tmp/.X11-unix \
   --bind /etc/machine-id:/etc/machine-id:ro \
   --bind /run/user/$(id -u):/run/user/$(id -u) \
@@ -152,6 +156,15 @@ apptainer exec \
   megqc
 ```
 
+> **Why `$DISPLAY` and not `:0`?**  
+> On shared / multi-user servers the X display number is rarely `:0`.
+> Always forward the real value of `$DISPLAY` from your shell.
+>
+> **Why `$DBUS_SESSION_BUS_ADDRESS` and not `/run/user/$(id -u)/bus`?**  
+> Some distributions (and SSH sessions) place the D-Bus socket under `/tmp/`
+> (e.g. `unix:path=/tmp/dbus-XXXXXXXX`) instead of `/run/user/<uid>/bus`.
+> Using the shell variable guarantees the correct path in every environment.
+>
 > **HPC / headless nodes:** the GUI will not work without a display. Use the
 > CLI commands instead. The container defaults to `QT_QPA_PLATFORM=offscreen`
 > which keeps all CLI tools functional on headless systems.
